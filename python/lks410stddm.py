@@ -28,7 +28,7 @@ class Data:
         Separators = ";;;"
         StandardVersion = "1.0"
         StandardHeader = f"LKS410 Standard Data Map"
-        Standard = f"{StandardHeader}{Separators}{StandardVersion}{Separators}https://github.com/410-dev/lks410-std-dm/docs/README.md"
+        Standard = f"{StandardHeader}{Separators}{StandardVersion}{Separators}https://github.com/410-dev/lks410-sdm/tree/main/docs"
         TypeTemporaryString = "__TYPE__"
 
     class ReservedNames:

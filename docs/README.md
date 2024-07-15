@@ -19,7 +19,7 @@ The LKS410 Standard Data Map consists of three main components:
 ### 1. Standard String
 
 ```json
-"standard": "LKS410 Standard Data Map;;;1.0;;;https://github.com/410-dev/lks410-std-dm/docs/README.md"
+"standard": "LKS410 Standard Data Map;;;1.0;;;https://github.com/410-dev/lks410-sdm/tree/main/docs"
 ```
 
 - **Purpose**: The standard string is used for checking compatibility between different implementations or versions of the LKS410 Standard.
@@ -89,7 +89,7 @@ The `ExtraProperties` section is designed for storing miscellaneous data that do
 
 ```json
 {
-    "standard": "LKS410 Standard Data Map;;;1.0;;;https://github.com/410-dev/lks410-std-dm/docs/README.md",
+    "standard": "LKS410 Standard Data Map;;;1.0;;;https://github.com/410-dev/lks410-sdm/tree/main/docs",
     "DataRoot": {
         "val1": "string data",
         "val1.type": "String",
