@@ -137,7 +137,12 @@ class Data:
             raise ValueError("Standard header mismatch.")
         if stdStringVersion != Data.Strings.StandardVersion:
             print(f"Warning: Standard version mismatch. Expected {Data.Strings.StandardVersion}, got {stdStringVersion}")
+        originalData = self.dictForm.copy()
         self.dictForm = jsonData
+        invalidFields: list = self.checkFieldNameValidity()
+        if len(invalidFields) > 0:
+            self.dictForm = originalData
+            raise ValueError("Field names are not valid: " + ", ".join(invalidFields))
 
     def compileString(self, linebreak: int = 4, checkFieldNameValidity: bool = True) -> str:
         if checkFieldNameValidity:
@@ -149,8 +154,34 @@ class Data:
         return json.dumps(self.dictForm, indent=linebreak)
 
     def checkFieldNameValidity(self) -> list:
-        # Return result of the check - invalid field names
-        return []
+        fieldNames = Data.getKeyNamesRecursive(self.dictForm[Data.ReservedNames.DataRoot], "")
+        invalidFieldNames = []
+        reservedFieldNames = [Data.ReservedNames.Standard, Data.ReservedNames.DataRoot,
+                              Data.ReservedNames.ExtraProperties, Data.ReservedNames.TypeField]
+        for fieldName in fieldNames:
+            if fieldName.split(".")[-1] in reservedFieldNames:
+                invalidFieldNames.append(fieldName)
+        return invalidFieldNames
+
+    @staticmethod
+    def getKeyNamesRecursive(obj: dict, currentScope: str) -> list:
+        keyNames = []
+        for key in obj:
+            if key != Data.ReservedNames.TypeField and key.endswith(f".{Data.ReservedNames.TypeField}"):
+                key = key.replace(f".{Data.ReservedNames.TypeField}", Data.Strings.TypeTemporaryString)
+            keyNames.append(f"{currentScope}.{key}")
+            if key not in obj:
+                continue
+            elif isinstance(obj[key], dict):
+                keyNames += Data.getKeyNamesRecursive(obj[key], f"{currentScope}.{key}")
+            elif isinstance(obj[key], list):
+                for i in range(len(obj[key])):
+                    if isinstance(obj[key][i], dict):
+                        keyNames += Data.getKeyNamesRecursive(obj[key][i], f"{currentScope}.{key}[{i}]")
+        for i in range(len(keyNames)):
+            if keyNames[i][0] == ".":
+                keyNames[i] = keyNames[i][1:]
+        return keyNames
 
     def traverse(self, name: str, create_missing: bool = False, allow_type_modifier: bool = False):
         # Disallowed characters:
