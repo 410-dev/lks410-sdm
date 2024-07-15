@@ -47,6 +47,7 @@ For example:
 
 Note: Type implementation is not mandatory. The .type suffix for defining types is optional and can be omitted if type specification is not needed for a particular use case. Auto, Undefined types will be automatically ommited when compiling to JSON.
 
+
 #### Supported Types
 
 1. **Primitive Types**:
@@ -73,6 +74,14 @@ Note: Type implementation is not mandatory. The .type suffix for defining types 
 
 - **Custom Objects**: Use `Object:NoStandard:@<language>=<full.class.path>` to specify language-specific object types.
   Example: `"val6.type": "Object:NoStandard:@python=framework.objects.UserObject:@java=javax.randomframework.objects.UserObject"`
+
+
+#### Naming Convention
+The name should imply the type of the value. The implication should be enough to notice if it is any type of complex structure like list or object or a primitive value like string or integer.
+- **Primitive**: Use cammel case with lower case start.
+    - Ex: `userName`, `emailAddress`
+- **Complex**: Use cammel case with upper case start.
+    - Ex: `Users`, `MessageObject`
 
 
 Raw binary data is not supported in this section.
