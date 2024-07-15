@@ -50,83 +50,15 @@ class Data:
     # This will get data from the object, if it exists
     # This runs recursively
     # It should return parent node if it is the last node, so that type can be checked
-    def get(self, name: str, defaultValue=None, recursion_fromObject=None, recursion_nodesToGo:list = None, recursion_depth:int = 0, querySafeMode: bool = False, setIfNotFound = False): # Unless recursion depth = 0, it should be (value, type, parent)
-        # If recursion_nodesToGo is None, it means that this is the first call
-        if recursion_nodesToGo is None:
-            recursion_nodesToGo = name.split(".")
+    def get(self, name: str):
+        grandparent, parent, key, index = self.traverse(name, create_missing=False, allow_type_modifier=True)
+        if parent is None:
+            return None
 
-        # If recursion_fromObject is None, it means that this is the first call
-        if recursion_fromObject is None:
-            recursion_fromObject = self.dictForm[Data.ReservedNames.DataRoot]
-
-        iterableObject = recursion_fromObject
-
-        # For each node, run recursion. If found, return it
-        supportedRecursionTypes = [Data.Types.Auto, Data.Types.Object, Data.Types.NoStandard, Data.Types.List]
-
-        # If the key is a list access, split the key and get the index
-        listAccessIdx = -1
-        if "[" in recursion_nodesToGo[0] and "]" in recursion_nodesToGo[0]:
-            listAccessIdx = int(recursion_nodesToGo[0].split("[")[1].split("]")[0])
-            recursion_nodesToGo[0] = recursion_nodesToGo[0].split("[")[0]
-
-        result: tuple = (None, None, None)
-        for key in iterableObject.keys():
-
-            # If the node is found, return it
-            if recursion_nodesToGo[0] == key and len(recursion_nodesToGo) == 1:
-
-                # Non-list access
-                if listAccessIdx == -1:
-                    if f"{key}.{Data.ReservedNames.TypeField}" in iterableObject:
-                        result = (iterableObject[key], iterableObject[f"{key}.{Data.ReservedNames.TypeField}"], iterableObject)
-                    else:
-                        result = (iterableObject[key], Data.Types.Auto, iterableObject)
-                    break
-
-                # List access
-                else:
-                    if f"{key}.{Data.ReservedNames.TypeField}" in iterableObject:
-                        if len(iterableObject[key]) > listAccessIdx and querySafeMode:
-                            result = (iterableObject[key], iterableObject[f"{key}.{Data.ReservedNames.TypeField}"], iterableObject)
-                        else:
-                            result = (iterableObject[key][listAccessIdx], iterableObject[f"{key}.{Data.ReservedNames.TypeField}"], iterableObject)
-                    else:
-                        if len(iterableObject[key]) > listAccessIdx and querySafeMode:
-                            result = (iterableObject[key], Data.Types.Auto, iterableObject)
-                        else:
-                            result = (iterableObject[key][listAccessIdx], Data.Types.Auto, iterableObject)
-                    break
-
-            # Run type checking. This allows to skip the type checking if the type is not specified
-            elif (
-                    type(recursion_fromObject[key]) is dict
-                    and
-                    (
-                            (f"{key}.{Data.ReservedNames.TypeField}" not in iterableObject)
-                            or
-                            (f"{key}.{Data.ReservedNames.TypeField}" in iterableObject and iterableObject[f"{key}.{Data.ReservedNames.TypeField}"] in supportedRecursionTypes)
-                    )
-            ):
-                if recursion_nodesToGo[0] == key:
-                    if listAccessIdx == -1:
-                        result = self.get(name, defaultValue, recursion_fromObject[key], recursion_nodesToGo[1:], recursion_depth + 1, querySafeMode)
-                    else:
-                        result = self.get(name, defaultValue, recursion_fromObject[key][listAccessIdx], recursion_nodesToGo[1:], recursion_depth + 1, querySafeMode)
-                    break
-
-            # Not found
-            else:
-                continue
-
-        if recursion_depth == 0:
-            if defaultValue is not None and result[0] is None:
-                if setIfNotFound:
-                    self.set(name, defaultValue)
-                return defaultValue
-            return result[0]
-
-        return result
+        if index == -1:
+            return parent.get(key)
+        else:
+            return parent[key][index] if index < len(parent[key]) else None
 
     def getExtraProperties(self) -> dict:
         return self.dictForm[Data.ReservedNames.ExtraProperties]
@@ -134,64 +66,18 @@ class Data:
     def getRoot(self) -> dict:
         return self.dictForm[Data.ReservedNames.DataRoot]
 
-    def set(self, name: str, value, setAs: str = Types.Auto, allowTypeModifier: bool = False) -> bool: # If auto, don't include type data
-        # Disallowed characters:
-        disallowedCharactersForKey = ["{", "}", "(", ")", ":"]
-        if not allowTypeModifier:
-            disallowedCharactersForKey.append(f".{Data.ReservedNames.TypeField}")
-        elif f".{Data.ReservedNames.TypeField}" in name:
-            name = name.replace(f".{Data.ReservedNames.TypeField}", Data.Strings.TypeTemporaryString)
-        for disallowedCharacter in disallowedCharactersForKey:
-            if disallowedCharacter in name:
-                return False
-
-        # If the type is invalid, return False
-        if setAs not in Data.Types.all:
+    def set(self, name: str, value, setAs: str = Types.Auto, allowTypeModifier: bool = False) -> bool:
+        grandparent, parent, key, index = self.traverse(name, create_missing=True, allow_type_modifier=allowTypeModifier)
+        if parent is None:
             return False
 
-        # Nodes
-        nodesRoute = name.split(".")
-        nodesRouteLength = len(nodesRoute)
+        if index == -1:
+            parent[key] = value
+        else:
+            parent[key][index] = value
 
-        currentNode = self.dictForm[Data.ReservedNames.DataRoot]
-        parentNodes = [currentNode]
-
-        for i in range(nodesRouteLength):
-            currentNodeName = nodesRoute[i]
-            listAccessIdx = -1
-            if "[" in currentNodeName and "]" in currentNodeName:
-                listAccessIdx = int(currentNodeName.split("[")[1].split("]")[0])
-                currentNodeName = currentNodeName.split("[")[0]
-
-            if i == nodesRouteLength - 1:
-                if listAccessIdx == -1:
-                    if Data.Strings.TypeTemporaryString in currentNodeName:
-                        currentNodeName = currentNodeName.replace(Data.Strings.TypeTemporaryString, f".{Data.ReservedNames.TypeField}")
-                    currentNode[currentNodeName] = value
-                else:
-                    if currentNodeName not in currentNode:
-                        currentNode[currentNodeName] = []
-                    while len(currentNode[currentNodeName]) <= listAccessIdx:
-                        currentNode[currentNodeName].append(None)
-                    currentNode[currentNodeName][listAccessIdx] = value
-                if setAs != Data.Types.Auto:
-                    currentNode[f"{currentNodeName}.{Data.ReservedNames.TypeField}"] = setAs
-            else:
-                if currentNodeName not in currentNode:
-                    if listAccessIdx == -1:
-                        currentNode[currentNodeName] = {}
-                    else:
-                        currentNode[currentNodeName] = []
-                        while len(currentNode[currentNodeName]) <= listAccessIdx:
-                            currentNode[currentNodeName].append(None)  # Changed from {} to None
-
-                if listAccessIdx == -1:
-                    currentNode = currentNode[currentNodeName]
-                else:
-                    if currentNode[currentNodeName][listAccessIdx] is None:
-                        currentNode[currentNodeName][listAccessIdx] = {}  # Initialize with {} only when accessing
-                    currentNode = currentNode[currentNodeName][listAccessIdx]
-                parentNodes.append(currentNode)
+        if setAs != Data.Types.Auto:
+            parent[f"{key}.{Data.ReservedNames.TypeField}"] = setAs
 
         return True
     
@@ -202,21 +88,41 @@ class Data:
         pass
 
     def info(self, name: str) -> tuple:
-        return self.get(name, recursion_fromObject=self.dictForm[Data.ReservedNames.DataRoot], recursion_depth=1, querySafeMode=True)
+        return self.traverse(name, create_missing=False, allow_type_modifier=True)
+
 
     def typeOf(self, name: str) -> str:
-        print(self.info(name))
-        typeInfo = self.info(f"{name}.{Data.ReservedNames}")[1]
-        if typeInfo is None:
-            return Data.Types.Auto
-        return typeInfo
+        infodat = self.info(name)
+        if infodat is None:
+            return Data.Types.Undefined
+        grandparent, parent, key, index = infodat
+        if parent is None:
+            return Data.Types.Undefined
+
+        if index == -1:
+            return parent.get(f"{key}.{Data.ReservedNames.TypeField}", Data.Types.Undefined)
+        else:
+            return parent[key][index].get(f"{Data.ReservedNames.TypeField}", Data.Types.Undefined) if index < len(parent[key]) else Data.Types.Undefined
 
     def typeMatches(self, name: str, typeName: str) -> bool:
         return self.typeOf(name) == typeName
 
-    def remove(self, name: str, onlyIfNotExist: bool = False) -> bool:
-        pass
-    
+    def remove(self, name: str) -> bool:
+        grandparent, parent, key, index = self.traverse(name, create_missing=False, allow_type_modifier=True)
+        if parent is None:
+            return False
+
+        if index == -1:
+            if key in parent:
+                del parent[key]
+                return True
+        else:
+            if key in parent and index < len(parent[key]):
+                parent[key][index] = None
+                return True
+
+        return False
+
     def parseFrom(self, stringData: str):
         jsonData = json.loads(stringData)
         self.dictForm = jsonData
@@ -234,53 +140,73 @@ class Data:
         # Return result of the check - invalid field names
         return []
 
+    def traverse(self, name: str, create_missing: bool = False, allow_type_modifier: bool = False):
+        # Disallowed characters:
+        disallowed_characters_for_key = ["{", "}", "(", ")", ":"]
+        if not allow_type_modifier:
+            disallowed_characters_for_key.append(f".{Data.ReservedNames.TypeField}")
+        elif f".{Data.ReservedNames.TypeField}" in name:
+            name = name.replace(f".{Data.ReservedNames.TypeField}", Data.Strings.TypeTemporaryString)
 
+        for disallowed_character in disallowed_characters_for_key:
+            if disallowed_character in name:
+                return None, None, None, None
 
+        # Nodes
+        nodes_route = name.split(".")
+        nodes_route_length = len(nodes_route)
 
-stringd = """{
-    "standard": "LKS410 Standard Data Map;;;1.0;;;https://github.com/410-dev/lks410-std-dm/docs/README.md",
-    "DataRoot": {
-        "val1": "string data",
-        "val1.type": "String",
+        current_node = self.dictForm[Data.ReservedNames.DataRoot]
+        parent_nodes = [current_node]
+        final_key = nodes_route[-1]
 
-        "val2": 1,
-        "val2.type": "Integer32",
+        for i in range(nodes_route_length):
+            current_node_name = nodes_route[i]
+            list_access_idx = -1
+            if "[" in current_node_name and "]" in current_node_name:
+                list_access_idx = int(current_node_name.split("[")[1].split("]")[0])
+                current_node_name = current_node_name.split("[")[0]
 
-        "val3": 1,
-        "val3.type": "Integer64",
+            if i == nodes_route_length - 1:
+                if Data.Strings.TypeTemporaryString in current_node_name:
+                    current_node_name = current_node_name.replace(Data.Strings.TypeTemporaryString,
+                                                                  f".{Data.ReservedNames.TypeField}")
 
-        "val4": ["Hello World"],
-        "val4.type": "List:String",
+                if list_access_idx == -1:
+                    return parent_nodes[-2] if len(parent_nodes) > 1 else None, parent_nodes[-1], current_node_name, -1
+                else:
+                    if create_missing and (current_node_name not in current_node or len(
+                            current_node[current_node_name]) <= list_access_idx):
+                        if current_node_name not in current_node:
+                            current_node[current_node_name] = []
+                        while len(current_node[current_node_name]) <= list_access_idx:
+                            current_node[current_node_name].append(None)
+                    return parent_nodes[-1], current_node, current_node_name, list_access_idx
+            else:
+                if create_missing and current_node_name not in current_node:
+                    if list_access_idx == -1:
+                        current_node[current_node_name] = {}
+                    else:
+                        current_node[current_node_name] = []
+                        while len(current_node[current_node_name]) <= list_access_idx:
+                            current_node[current_node_name].append(None)
 
-        "val5": ["Hello World", 123],
-        "val5.type": "List:Any",
+                if current_node_name not in current_node:
+                    return None, None, None, None
 
-        "val6": {
-            "name": "John Appleseed",
-            "phone": "1234-1234"
-        },
-        "val6.type": "Object",
+                if list_access_idx == -1:
+                    current_node = current_node[current_node_name]
+                else:
+                    if list_access_idx >= len(current_node[current_node_name]):
+                        return None, None, None, None
+                    if current_node[current_node_name][list_access_idx] is None:
+                        if create_missing:
+                            current_node[current_node_name][list_access_idx] = {}
+                        else:
+                            return None, None, None, None
+                    current_node = current_node[current_node_name][list_access_idx]
+                parent_nodes.append(current_node)
 
-        "val7": true,
-        "val7.type": "Boolean",
+        return None, None, None, None  # This line should never be reached, but it's here for completeness
 
-        "val8": 0.4,
-        "val8.type": "Float:double",
-
-        "val9": "Hello",
-        "val9.type": "Auto"
-    },
-    "ExtraProperties": {
-
-    }
-}"""
-
-data = Data(parseString=stringd)
-
-data.set("val64.val32.val8.lines[1].test[4].line", "Hello World", Data.Types.Integer16)
-# print(data.get("val64.val32.val8.lines[1].test[4].line"))
-# print(data.typeOf("val64.val32.val8.lines[1].test[4].line"))
-# data.setType("val64.val32.val8.lines[1].test[4].line", Data.Types.String)
-# print(data.typeOf("val64.val32.val8.lines[1].test[4].line"))
-print(data.compileString())
 
