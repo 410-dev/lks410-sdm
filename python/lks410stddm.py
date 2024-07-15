@@ -25,7 +25,10 @@ class Data:
         complex = [List, Object, NoStandard]
 
     class Strings:
-        Standard = "LKS410 Standard Data Map;;;1.0;;;https://github.com/410-dev/lks410-std-dm/docs/README.md"
+        Separators = ";;;"
+        StandardVersion = "1.0"
+        StandardHeader = f"LKS410 Standard Data Map"
+        Standard = f"{StandardHeader}{Separators}{StandardVersion}{Separators}https://github.com/410-dev/lks410-std-dm/docs/README.md"
         TypeTemporaryString = "__TYPE__"
 
     class ReservedNames:
@@ -125,6 +128,15 @@ class Data:
 
     def parseFrom(self, stringData: str):
         jsonData = json.loads(stringData)
+        if Data.ReservedNames.Standard not in jsonData:
+            raise ValueError("Standard field not found in the data")
+        stdString = jsonData[Data.ReservedNames.Standard]
+        stdStringHeader = stdString.split(Data.Strings.Separators)[0]
+        stdStringVersion = stdString.split(Data.Strings.Separators)[1]
+        if stdStringHeader != Data.Strings.StandardHeader:
+            raise ValueError("Standard header mismatch.")
+        if stdStringVersion != Data.Strings.StandardVersion:
+            print(f"Warning: Standard version mismatch. Expected {Data.Strings.StandardVersion}, got {stdStringVersion}")
         self.dictForm = jsonData
 
     def compileString(self, linebreak: int = 4, checkFieldNameValidity: bool = True) -> str:
