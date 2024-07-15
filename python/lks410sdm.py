@@ -15,8 +15,8 @@ class Data:
         Boolean   = "Boolean" # boolean in Java
         List      = "List"
         Object    = "Object"  # Json object in Java
-        Undefined = "NoStandard"    # Undefined type, same as "Auto"
-        NoStandard= f"{Object}{separator}{Undefined}" # No standard type, same as "Auto
+        Undefined = "UndefinedType"    # Undefined type, same as "Auto"
+        NoStandard= f"{Object}{separator}NoStandard"
         Auto      = "Auto"    # Auto-detect type
         Null      = "Null"    # Null value (None in Python)
 
@@ -103,9 +103,25 @@ class Data:
             return Data.Types.Undefined
 
         if index == -1:
-            return parent.get(f"{key}.{Data.ReservedNames.TypeField}", Data.Types.Undefined)
+            typeName = parent.get(f"{key}.{Data.ReservedNames.TypeField}", Data.Types.Undefined)
         else:
-            return parent[key][index].get(f"{Data.ReservedNames.TypeField}", Data.Types.Undefined) if index < len(parent[key]) else Data.Types.Undefined
+            typeName = parent[key][index].get(f"{Data.ReservedNames.TypeField}", Data.Types.Undefined) if index < len(parent[key]) else Data.Types.Undefined
+
+        if typeName.startswith(Data.Types.NoStandard):
+            typeClass: list = typeName.split(Data.Types.separator)[2:]
+            found = False
+            for typeClassName in typeClass:
+                if typeClassName.startswith("@python="):
+                    typeName = typeClassName.split("=")[1]
+                    found = True
+                    break
+
+            if not found:
+                typeName = Data.Types.Undefined
+
+            typeName = f"{Data.Types.NoStandard}{Data.Types.separator}{typeName}"
+
+        return typeName
 
     def typeMatches(self, name: str, typeName: str) -> bool:
         return self.typeOf(name) == typeName
