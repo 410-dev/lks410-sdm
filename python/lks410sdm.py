@@ -1,8 +1,6 @@
 import json
 import importlib
 
-
-
 class Data:
 
     class Types:
@@ -15,6 +13,7 @@ class Data:
         Integer64 = "Int64"   # long in java
         Float32   = "Float32" # float in Java
         Float64   = "Float64" # double in Java
+        Float     = "Float64"
         Boolean   = "Boolean" # boolean in Java
         List      = "List"
         Object    = "Object"  # Json object in Java
@@ -23,10 +22,10 @@ class Data:
         Auto      = "Auto"    # Auto-detect type
         Null      = "Null"    # Null value (None in Python)
 
-        all = [String, Integer8, Integer16, Integer, Integer32, Integer64, Float32, Float64, Boolean, List, Object, NoStandard, Auto, Null]
+        all = [String, Integer8, Integer16, Integer, Integer32, Integer64, Float32, Float64, Float, Boolean, List, Object, NoStandard, Auto, Null]
         allInPythonType = [str, int, float, bool, list, dict, None]
-        allExportable = [String, Integer8, Integer16, Integer, Integer32, Integer64, Float32, Float64, Boolean, List, Object]
-        primitive = [String, Integer8, Integer16, Integer, Integer32, Integer64, Float32, Float64, Boolean]
+        allExportable = [String, Integer8, Integer16, Integer, Integer32, Integer64, Float32, Float64, Float, Boolean, List, Object]
+        primitive = [String, Integer8, Integer16, Integer, Integer32, Integer64, Float32, Float64, Float, Boolean]
         dictionary = [Object, NoStandard]
         complex = [List, Object, NoStandard]
 
@@ -118,8 +117,26 @@ class Data:
     def info(self, name: str) -> tuple:
         return self.traverse(name, create_missing=False, allow_type_modifier=True)
 
+    @staticmethod
+    def autoType(o) -> str:
+        if isinstance(o, dict):
+            return Data.Types.Object
+        elif isinstance(o, list):
+            return f"{Data.Types.List}{Data.Types.separator}{Data.Types.Auto}"
+        elif isinstance(o, bool):
+            return Data.Types.Boolean
+        elif isinstance(o, str):
+            return Data.Types.String
+        elif isinstance(o, int):
+            return Data.Types.Integer
+        elif isinstance(o, float):
+            return Data.Types.Float
+        elif o is None:
+            return Data.Types.Null
+        else:
+            return Data.Types.Undefined
 
-    def typeOf(self, name: str, infodat: tuple = None) -> str:
+    def typeOf(self, name: str, infodat: tuple = None, useAutoTypeOnly: bool = False) -> str:
         if infodat == None:
             infodat = self.info(name)
 
@@ -129,38 +146,26 @@ class Data:
         if parent is None:
             return Data.Types.Undefined
 
-        def autoType(parent, key, index) -> str:
-            if isinstance(parent[key][index], dict):
-                return Data.Types.Object
-            elif isinstance(parent[key][index], list):
-                return Data.Types.List
-            elif isinstance(parent[key][index], str):
-                return Data.Types.String
-            elif isinstance(parent[key][index], int):
-                return Data.Types.Integer
-            elif isinstance(parent[key][index], float):
-                return Data.Types.Float32
-            elif isinstance(parent[key][index], bool):
-                return Data.Types.Boolean
-            elif parent[key][index] is None:
-                return Data.Types.Null
-            else:
-                return Data.Types.Undefined
-
         if index == -1:
-            typeName = parent.get(f"{key}.{Data.ReservedNames.TypeField}", Data.Types.Undefined)
+            if f"{key}.{Data.ReservedNames.TypeField}" in parent:
+                if useAutoTypeOnly:
+                    typeName = Data.autoType(parent[key])
+                else:
+                    typeName = parent[f"{key}.{Data.ReservedNames.TypeField}"]
+            else:
+                typeName = Data.autoType(parent[key])
         else:
             if f"{key}.{Data.ReservedNames.TypeField}" in grandparent:
                 typeName = grandparent[f"{key}.{Data.ReservedNames.TypeField}"]
                 if typeName.startswith(f"{Data.Types.List}{Data.Types.separator}"):
                     typeName = typeName[len(f"{Data.Types.List}{Data.Types.separator}"):]
                     if typeName == Data.Types.Auto:
-                        typeName = autoType(parent, key, index)
+                        typeName = Data.autoType(parent[key][index])
                 else:
                     typeName = Data.Types.Undefined
             else:
                 # Auto type
-                typeName = autoType(parent, key, index)
+                typeName = Data.autoType(parent[key][index])
 
         if typeName.startswith(Data.Types.NoStandard):
             typeClass: list = typeName.split(Data.Types.separator)[2:]
@@ -178,8 +183,17 @@ class Data:
 
         return typeName
 
-    def typeMatches(self, name: str, typeName: str) -> bool:
-        return self.typeOf(name) == typeName
+    def typeMatches(self, name: str, typeName: str, useAutoTypeOnly: bool = False, strictInSize: bool = False) -> bool:
+        expectedType = self.typeOf(name, useAutoTypeOnly=useAutoTypeOnly)
+
+        if not strictInSize:
+            numbers = "1234567890"
+            for number in numbers:
+                expectedType = expectedType.replace(number, "")
+
+        expectedType = expectedType.split(Data.Types.separator)[0]
+
+        return typeName.startswith(expectedType)
 
     def remove(self, name: str) -> bool:
         grandparent, parent, key, index = self.traverse(name, create_missing=False, allow_type_modifier=True)
@@ -378,3 +392,28 @@ class Data:
                     return usingType(**parent[key][index])
 
         return None
+
+    def typeEnforce(self, strictTypeChecks: bool = False, strictInSize: bool = False, verbose: bool = True) -> bool:
+        names = Data.getKeyNamesRecursive(self.dictForm[Data.ReservedNames.DataRoot], "")
+        allPass = True
+        for name in names:
+            if name.endswith(Data.Strings.TypeTemporaryString):
+                continue
+
+            typeData = self.typeOf(name)
+            self.setType(name, typeData)
+
+            if strictTypeChecks:
+                if not self.typeMatches(name, typeData, strictTypeChecks, strictInSize):
+                    allPass = False
+                    if verbose:
+                        print(f"Potential type check error: Type mismatch for {name}. Expected {self.typeOf(name, useAutoTypeOnly=True)}, got {self.typeOf(name)}")
+
+        return allPass
+
+    def sortKeysByName(self, reverse: bool = False):
+        def sortKeys(obj: dict):
+            return dict(sorted(obj.items(), key=lambda x: x[0], reverse=reverse))
+
+        self.dictForm[Data.ReservedNames.DataRoot] = sortKeys(self.dictForm[Data.ReservedNames.DataRoot])
+
