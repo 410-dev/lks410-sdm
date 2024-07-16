@@ -393,7 +393,7 @@ class Data:
 
         return None
 
-    def typeEnforce(self, strictTypeChecks: bool = False, strictInSize: bool = False, verbose: bool = True) -> bool:
+    def typeCheck(self, writeTypeData: bool = False, strictTypeChecks: bool = False, strictInSize: bool = False, verbose: bool = True, handleNamingConvention: str = "warning") -> bool:
         names = Data.getKeyNamesRecursive(self.dictForm[Data.ReservedNames.DataRoot], "")
         allPass = True
         for name in names:
@@ -401,7 +401,35 @@ class Data:
                 continue
 
             typeData = self.typeOf(name)
-            self.setType(name, typeData)
+            if writeTypeData:
+                self.setType(name, typeData)
+
+            if handleNamingConvention == "warning" or handleNamingConvention == "error":
+                typeMaster = typeData.split(Data.Types.separator)[0]
+                currentName = name.split(".")[-1]
+                hasUnderscore = "_" in currentName
+                isComplexName = currentName[0].isupper()
+                if hasUnderscore:
+                    if handleNamingConvention == "error":
+                        allPass = False
+                        print(f"Error: Field name {currentName} contains underscore '_' character which is not in field naming convention.")
+                    elif verbose:
+                        print(f"Warning: Field name {currentName} contains underscore '_' character which is not in field naming convention.")
+                if typeMaster in Data.Types.complex:
+                    if not isComplexName:
+                        if handleNamingConvention == "error":
+                            allPass = False
+                            print(f"Error: Field name {currentName} is not in complex field naming convention. Use uppercase starting letter instead.")
+                        elif verbose:
+                            print(f"Warning: Field name {currentName} is not in complex field naming convention. Use uppercase starting letter instead.")
+                else:
+                    if isComplexName:
+                        if handleNamingConvention == "error":
+                            allPass = False
+                            print(f"Error: Field name {currentName} is in complex field naming convention. Use lowercase starting letter instead.")
+                        elif verbose:
+                            print(f"Warning: Field name {currentName} is in complex field naming convention. Use lowercase starting letter instead.")
+
 
             if strictTypeChecks:
                 if not self.typeMatches(name, typeData, strictTypeChecks, strictInSize):
