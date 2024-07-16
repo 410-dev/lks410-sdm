@@ -417,3 +417,26 @@ class Data:
 
         self.dictForm[Data.ReservedNames.DataRoot] = sortKeys(self.dictForm[Data.ReservedNames.DataRoot])
 
+    def append(self, name: str, value):
+        grandparent, parent, key, index = self.traverse(name, create_missing=False, allow_type_modifier=False)
+        if parent is None:
+            return False
+        if index == -1:
+            if isinstance(parent[key], list):
+                if isinstance(value, list):
+                    parent[key] = parent[key] + value
+                else:
+                    parent[key].append(value)
+            else:
+                return False
+        else:
+            if isinstance(parent[key], list):
+                if isinstance(value, list):
+                    parent[key][index] = parent[key][index] + value
+                else:
+                    parent[key][index].append(value)
+            else:
+                return False
+
+        return True
+
