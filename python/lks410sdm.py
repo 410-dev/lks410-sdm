@@ -1,4 +1,7 @@
 import json
+import importlib
+
+
 
 class Data:
 
@@ -21,7 +24,10 @@ class Data:
         Null      = "Null"    # Null value (None in Python)
 
         all = [String, Integer8, Integer16, Integer, Integer32, Integer64, Float32, Float64, Boolean, List, Object, NoStandard, Auto, Null]
+        allInPythonType = [str, int, float, bool, list, dict, None]
+        allExportable = [String, Integer8, Integer16, Integer, Integer32, Integer64, Float32, Float64, Boolean, List, Object]
         primitive = [String, Integer8, Integer16, Integer, Integer32, Integer64, Float32, Float64, Boolean]
+        dictionary = [Object, NoStandard]
         complex = [List, Object, NoStandard]
 
     class Strings:
@@ -30,6 +36,8 @@ class Data:
         StandardHeader = f"LKS410 Standard Data Map"
         Standard = f"{StandardHeader}{Separators}{StandardVersion}{Separators}https://github.com/410-dev/lks410-sdm/tree/main/docs"
         TypeTemporaryString = "__TYPE__"
+        NoStandardObjPython = "@python="
+        NoStandardObjJava   = "@java="
 
     class ReservedNames:
         Standard = "standard"
@@ -48,12 +56,7 @@ class Data:
         if parseString is not None:
             self.parseFrom(parseString)
 
-
-
-    # This will get data from the object, if it exists
-    # This runs recursively
-    # It should return parent node if it is the last node, so that type can be checked
-    def get(self, name: str):
+    def getFast(self, name: str):
         grandparent, parent, key, index = self.traverse(name, create_missing=False, allow_type_modifier=True)
         if parent is None:
             return None
@@ -75,15 +78,37 @@ class Data:
             return False
 
         if index == -1:
-            parent[key] = value
+            if type(value) in Data.Types.allInPythonType:
+                parent[key] = value
+            else:
+                parent[key] = value.__dict__
         else:
-            parent[key][index] = value
+            if type(value) in Data.Types.allInPythonType:
+                parent[key][index] = value
+            else:
+                parent[key][index] = value.__dict__
 
-        if setAs != Data.Types.Auto:
+        def classname(obj):
+            cls = type(obj)
+            module = cls.__module__
+            name = cls.__qualname__
+            if module is not None and module != "__builtin__":
+                name = module + "." + name
+            return name
+
+        if setAs == Data.Types.Auto:
+            if type(value) not in Data.Types.allInPythonType:
+                if f"{key}.{Data.ReservedNames.TypeField}" in parent and parent[f"{key}.{Data.ReservedNames.TypeField}"] is not None:
+                    setAs = parent[f"{key}.{Data.ReservedNames.TypeField}"]
+                else:
+                    cn = classname(value)
+                    setAs = f"{Data.Types.NoStandard}{Data.Types.separator}{Data.Strings.NoStandardObjPython}{cn}"
+                parent[f"{key}.{Data.ReservedNames.TypeField}"] = setAs
+        else:
             parent[f"{key}.{Data.ReservedNames.TypeField}"] = setAs
 
         return True
-    
+
     def setType(self, of: str, setAs: str):
         self.set(name=f"{of}.{Data.ReservedNames.TypeField}", value=setAs, allowTypeModifier=True)
 
@@ -94,24 +119,54 @@ class Data:
         return self.traverse(name, create_missing=False, allow_type_modifier=True)
 
 
-    def typeOf(self, name: str) -> str:
-        infodat = self.info(name)
+    def typeOf(self, name: str, infodat: tuple = None) -> str:
+        if infodat == None:
+            infodat = self.info(name)
+
         if infodat is None:
             return Data.Types.Undefined
         grandparent, parent, key, index = infodat
         if parent is None:
             return Data.Types.Undefined
 
+        def autoType(parent, key, index) -> str:
+            if isinstance(parent[key][index], dict):
+                return Data.Types.Object
+            elif isinstance(parent[key][index], list):
+                return Data.Types.List
+            elif isinstance(parent[key][index], str):
+                return Data.Types.String
+            elif isinstance(parent[key][index], int):
+                return Data.Types.Integer
+            elif isinstance(parent[key][index], float):
+                return Data.Types.Float32
+            elif isinstance(parent[key][index], bool):
+                return Data.Types.Boolean
+            elif parent[key][index] is None:
+                return Data.Types.Null
+            else:
+                return Data.Types.Undefined
+
         if index == -1:
             typeName = parent.get(f"{key}.{Data.ReservedNames.TypeField}", Data.Types.Undefined)
         else:
-            typeName = parent[key][index].get(f"{Data.ReservedNames.TypeField}", Data.Types.Undefined) if index < len(parent[key]) else Data.Types.Undefined
+            if f"{key}.{Data.ReservedNames.TypeField}" in grandparent:
+                typeName = grandparent[f"{key}.{Data.ReservedNames.TypeField}"]
+                if typeName.startswith(f"{Data.Types.List}{Data.Types.separator}"):
+                    typeName = typeName[len(f"{Data.Types.List}{Data.Types.separator}"):]
+                    if typeName == Data.Types.Auto:
+                        typeName = autoType(parent, key, index)
+                else:
+                    typeName = Data.Types.Undefined
+            else:
+                # Auto type
+                typeName = autoType(parent, key, index)
 
         if typeName.startswith(Data.Types.NoStandard):
             typeClass: list = typeName.split(Data.Types.separator)[2:]
             found = False
             for typeClassName in typeClass:
-                if typeClassName.startswith("@python="):
+                if typeClassName.startswith(Data.Strings.NoStandardObjPython):
                     typeName = typeClassName.split("=")[1]
                     found = True
                     break
@@ -268,4 +323,58 @@ class Data:
 
         return None, None, None, None  # This line should never be reached, but it's here for completeness
 
+    # Exporting as typed object
+    def get(self, name: str, usingType: type = None, copyDictTo: object=None):
+        infodat = self.traverse(name, create_missing=False, allow_type_modifier=True)
+        grandparent, parent, key, index = infodat
 
+        # Not found
+        if parent is None:
+            return None
+
+        # Not list, key available in parent
+        if index == -1 and key in parent:
+            if usingType is None:
+                typeName = self.typeOf(key, infodat)
+                if typeName.startswith(Data.Types.NoStandard):
+                    typeName = typeName[len(Data.Types.NoStandard) + len(Data.Types.separator):]
+                    modulePath = typeName.split(".")[:-1]
+                    objectName = typeName.split(".")[-1]
+                    module = importlib.import_module(".".join(modulePath))
+                    if copyDictTo is None:
+                        return getattr(module, objectName)(**parent[key])
+                    else:
+                        copyDictTo.__dict__.update(parent[key])
+                        return copyDictTo
+
+                elif typeName in Data.Types.allExportable:
+                    return parent[key]
+                else:
+                    return parent[key]
+            else:
+                return usingType(**parent[key])
+
+        # It's a list
+        else:
+            if key in parent and index < len(parent[key]):
+                if usingType is None:
+                    typeName = self.typeOf(f"{key}[{index}]", infodat)
+                    if typeName.startswith(Data.Types.NoStandard):
+                        typeName = typeName[len(Data.Types.NoStandard) + len(Data.Types.separator):]
+                        modulePath = typeName.split(".")[:-1]
+                        objectName = typeName.split(".")[-1]
+                        module = importlib.import_module(".".join(modulePath))
+                        if copyDictTo is None:
+                            return getattr(module, objectName)(**parent[key][index])
+                        else:
+                            copyDictTo.__dict__.update(parent[key][index])
+                            return copyDictTo
+
+                    elif typeName in Data.Types.allExportable:
+                        return parent[key][index]
+                    else:
+                        return parent[key][index]
+                else:
+                    return usingType(**parent[key][index])
+
+        return None
