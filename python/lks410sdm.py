@@ -44,7 +44,7 @@ class Data:
         ExtraProperties = "ExtraProperties"
         TypeField = "type"
 
-    def __init__(self, parseString: str = None, checkValidity: bool = True):
+    def __init__(self, parseString: str = None, checkValidity: bool = True, parseFile: str = None):
         self.checkValidity = checkValidity
         self.dictForm = {
             Data.ReservedNames.Standard: Data.Strings.Standard,
@@ -52,8 +52,13 @@ class Data:
             Data.ReservedNames.ExtraProperties: {}
         }
 
+        if parseString is not None and parseFile is not None:
+            raise ValueError("Both parseString and parseFile cannot be used at the same time.")
+
         if parseString is not None:
-            self.parseFrom(parseString)
+            self.parseFromString(parseString)
+        elif parseFile is not None:
+            self.parseFromFile(parseFile)
 
     def getFast(self, name: str):
         grandparent, parent, key, index = self.traverse(name, create_missing=False, allow_type_modifier=True)
@@ -112,7 +117,7 @@ class Data:
         self.set(name=f"{of}.{Data.ReservedNames.TypeField}", value=setAs, allowTypeModifier=True)
 
     def has(self, name: str) -> bool:
-        pass
+        return self.getFast(name) is not None
 
     def info(self, name: str) -> tuple:
         return self.traverse(name, create_missing=False, allow_type_modifier=True)
@@ -211,7 +216,7 @@ class Data:
 
         return False
 
-    def parseFrom(self, stringData: str):
+    def parseFromString(self, stringData: str):
         jsonData = json.loads(stringData)
         if Data.ReservedNames.Standard not in jsonData:
             raise ValueError("Standard field not found in the data")
@@ -228,6 +233,10 @@ class Data:
         if len(invalidFields) > 0:
             self.dictForm = originalData
             raise ValueError("Field names are not valid: " + ", ".join(invalidFields))
+
+    def parseFromFile(self, filePath: str):
+        with open(filePath, "r") as file:
+            self.parseFromString(file.read())
 
     def compileString(self, linebreak: int = 4, checkFieldNameValidity: bool = True) -> str:
         if checkFieldNameValidity:
