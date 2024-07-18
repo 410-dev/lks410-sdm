@@ -402,7 +402,7 @@ class Data:
 
         return None
 
-    def typeCheck(self, writeTypeData: bool = False, strictTypeChecks: bool = False, strictInSize: bool = False, verbose: bool = True, handleNamingConvention: str = "warning") -> bool:
+    def typeCheck(self, writeTypeData: bool = False, strictTypeChecks: bool = False, strictInSize: bool = False, verbose: bool = True, handleNamingConvention: str = "warning", markTypeEnforcementCompletedOnWritingTypeData: bool = True) -> bool:
         names = Data.getKeyNamesRecursive(self.dictForm[Data.ReservedNames.DataRoot], "")
         allPass = True
         for name in names:
@@ -439,12 +439,14 @@ class Data:
                         elif verbose:
                             print(f"Warning: Field name {currentName} is in complex field naming convention. Use lowercase starting letter instead.")
 
-
             if strictTypeChecks:
                 if not self.typeMatches(name, typeData, strictTypeChecks, strictInSize):
                     allPass = False
                     if verbose:
                         print(f"Potential type check error: Type mismatch for {name}. Expected {self.typeOf(name, useAutoTypeOnly=True)}, got {self.typeOf(name)}")
+
+        if allPass and markTypeEnforcementCompletedOnWritingTypeData:
+            self.dictForm[Data.ReservedNames.ExtraProperties]["typeEnforcement"] = True
 
         return allPass
 
@@ -477,3 +479,140 @@ class Data:
 
         return True
 
+    def toCallableData(self):
+        return CallableData(self.getRoot())
+
+    def fromCallableData(self, callableDS):
+        self.dictForm[Data.ReservedNames.DataRoot] = callableDS.getAsDict()
+
+
+class CallableData:
+    def __init__(self, data: dict):
+        self._data = data
+        self._create_structure(data)
+
+    def _create_structure(self, data, prefix=''):
+        for key, value in data.items():
+            if key.endswith('.type'):
+                continue
+            full_key = f"{prefix}{key}" if prefix else key
+            if isinstance(value, dict):
+                setattr(self, full_key, self._create_nested_property(full_key, value))
+            elif isinstance(value, list):
+                setattr(self, full_key, self._create_list_property(full_key, value))
+            else:
+                setattr(self, full_key, self._create_property(full_key))
+
+    def _create_nested_property(self, key, value):
+        nested = CallableData(value)
+        def nested_getter():
+            return nested
+        return nested_getter
+
+    def _create_list_property(self, key, value):
+        def list_getter_setter(*args):
+            if len(args) == 0:
+                return [self._wrap_value(item, f"{key}[{i}]") for i, item in enumerate(self._data[key])]
+            else:
+                new_value = args[0]
+                type_key = f"{key}.type"
+                if type_key in self._data:
+                    self._check_list_type(new_value, self._data[type_key])
+                self._data[key] = new_value
+                return None
+        return list_getter_setter
+
+    def _wrap_value(self, value, path):
+        if isinstance(value, dict):
+            return CallableData(value)
+        elif isinstance(value, list):
+            return [self._wrap_value(item, f"{path}[{i}]") for i, item in enumerate(value)]
+        else:
+            return self._create_primitive_property(path, value)
+
+    def _create_primitive_property(self, path, value):
+        def getter_setter(*args):
+            if len(args) == 0:
+                return value
+            else:
+                new_value = args[0]
+                keys = path.replace(']', '').replace('[', '.').split('.')
+                target = self._data
+                for key in keys[:-1]:
+                    if key.isdigit():
+                        target = target[int(key)]
+                    else:
+                        target = target[key]
+                if keys[-1].isdigit():
+                    target[int(keys[-1])] = new_value
+                else:
+                    target[keys[-1]] = new_value
+                return None
+        return getter_setter
+
+    def _check_list_type(self, value, type_string):
+        if not isinstance(value, list):
+            raise TypeError(f"Expected List, got {type(value).__name__}")
+        if type_string.startswith("List:"):
+            item_type = self._get_type(type_string.split(":")[1])
+            if item_type:
+                for item in value:
+                    if not isinstance(item, item_type) and item_type != object:
+                        raise TypeError(f"List item: Expected {item_type.__name__}, got {type(item).__name__}")
+
+    def _create_property(self, key):
+        def getter_setter(*args):
+            if len(args) == 0:
+                return self._data[key]
+            else:
+                new_value = args[0]
+                type_key = f"{key}.type"
+                if type_key in self._data:
+                    expected_type = self._get_type(self._data[type_key])
+                    if expected_type and not isinstance(new_value, expected_type) and expected_type != object:
+                        raise TypeError(f"Expected {expected_type.__name__}, got {type(new_value).__name__}")
+                self._data[key] = new_value
+                return None
+
+        return getter_setter
+
+    def _get_type(self, type_string):
+        type_map = {
+            'String': str,
+            'Integer': int,
+            'Float': float,
+            'Boolean': bool,
+            'Object': dict,
+            'Array': list,
+            'Auto': object  # 'Auto' will match any type
+        }
+        return type_map.get(type_string)
+
+    def __getattr__(self, name):
+        if name in self._data:
+            if isinstance(self._data[name], dict):
+                return self._create_nested_property(name, self._data[name])()
+            elif isinstance(self._data[name], list):
+                return self._create_list_property(name, self._data[name])
+            return self._create_property(name)
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+    def __call__(self):
+        return self
+
+    def __getitem__(self, key):
+        if isinstance(self._data, list):
+            return self._wrap_value(self._data[key], f"[{key}]")
+        raise TypeError("This CallableStructures instance is not subscriptable")
+
+    def getAsDict(self):
+        def convert(item):
+            if isinstance(item, CallableData):
+                return item.getAsDict()
+            elif isinstance(item, list):
+                return [convert(i) for i in item]
+            elif isinstance(item, dict):
+                return {k: convert(v) for k, v in item.items()}
+            else:
+                return item
+        return convert(self._data)
