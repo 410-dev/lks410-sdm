@@ -485,11 +485,14 @@ class Data:
     def fromCallableData(self, callableDS):
         self.dictForm[Data.ReservedNames.DataRoot] = callableDS.getAsDict()
 
+    def __str__(self):
+        return self.compileString()
+
 
 class CallableData:
-    def __init__(self, data: dict):
-        self._data = data
-        self._create_structure(data)
+    def __init__(self, data: dict = None):
+        self._data = data if data is not None else {}
+        self._create_structure(self._data)
 
     def _create_structure(self, data, prefix=''):
         for key, value in data.items():
@@ -512,7 +515,7 @@ class CallableData:
     def _create_list_property(self, key, value):
         def list_getter_setter(*args):
             if len(args) == 0:
-                return [self._wrap_value(item, f"{key}[{i}]") for i, item in enumerate(self._data[key])]
+                return ListWrapper([self._wrap_value(item, f"{key}[{i}]") for i, item in enumerate(self._data[key])])
             else:
                 new_value = args[0]
                 type_key = f"{key}.type"
@@ -526,7 +529,7 @@ class CallableData:
         if isinstance(value, dict):
             return CallableData(value)
         elif isinstance(value, list):
-            return [self._wrap_value(item, f"{path}[{i}]") for i, item in enumerate(value)]
+            return ListWrapper([self._wrap_value(item, f"{path}[{i}]") for i, item in enumerate(value)])
         else:
             return self._create_primitive_property(path, value)
 
@@ -540,11 +543,17 @@ class CallableData:
                 target = self._data
                 for key in keys[:-1]:
                     if key.isdigit():
-                        target = target[int(key)]
+                        index = int(key)
+                        while len(target) <= index:
+                            target.append({})
+                        target = target[index]
                     else:
-                        target = target[key]
+                        target = target.setdefault(key, {})
                 if keys[-1].isdigit():
-                    target[int(keys[-1])] = new_value
+                    index = int(keys[-1])
+                    while len(target) <= index:
+                        target.append({})
+                    target[index] = new_value
                 else:
                     target[keys[-1]] = new_value
                 return None
@@ -563,7 +572,7 @@ class CallableData:
     def _create_property(self, key):
         def getter_setter(*args):
             if len(args) == 0:
-                return self._data[key]
+                return self._data.get(key)
             else:
                 new_value = args[0]
                 type_key = f"{key}.type"
@@ -573,7 +582,6 @@ class CallableData:
                         raise TypeError(f"Expected {expected_type.__name__}, got {type(new_value).__name__}")
                 self._data[key] = new_value
                 return None
-
         return getter_setter
 
     def _get_type(self, type_string):
@@ -589,26 +597,23 @@ class CallableData:
         return type_map.get(type_string)
 
     def __getattr__(self, name):
-        if name in self._data:
-            if isinstance(self._data[name], dict):
-                return self._create_nested_property(name, self._data[name])()
-            elif isinstance(self._data[name], list):
-                return self._create_list_property(name, self._data[name])
-            return self._create_property(name)
-        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+        if name not in self._data:
+            self._data[name] = []
+        if isinstance(self._data[name], dict):
+            return self._create_nested_property(name, self._data[name])()
+        elif isinstance(self._data[name], list):
+            return self._create_list_property(name, self._data[name])
+        return self._create_property(name)
 
     def __call__(self):
         return self
-
-    def __getitem__(self, key):
-        if isinstance(self._data, list):
-            return self._wrap_value(self._data[key], f"[{key}]")
-        raise TypeError("This CallableStructures instance is not subscriptable")
 
     def getAsDict(self):
         def convert(item):
             if isinstance(item, CallableData):
                 return item.getAsDict()
+            elif isinstance(item, ListWrapper):
+                return [convert(i) for i in item]
             elif isinstance(item, list):
                 return [convert(i) for i in item]
             elif isinstance(item, dict):
@@ -616,3 +621,12 @@ class CallableData:
             else:
                 return item
         return convert(self._data)
+
+class ListWrapper(list):
+    def __getitem__(self, key):
+        while len(self) <= key:
+            self.append(CallableData({}))
+        return super().__getitem__(key)
+
+    def __call__(self):
+        return self
